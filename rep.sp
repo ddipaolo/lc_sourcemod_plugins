@@ -4,13 +4,18 @@
 
 #define PLUGIN_VERSION "0.1"
 
-new Handle:db = INVALID_HANDLE;
-new MinMatchLength = 4;
-new String:errors[255];
-new String:user_rep_table_name[] = "user_rep";
-new String:user_rep_rep_column_name[] = "rep";
-new String:user_rep_steamid_column_name[] = "steam_id";
-//new String:user_votes_table_name[] = "user_votes";
+
+// Global vars
+new Handle:g_dbHandle = INVALID_HANDLE;
+new String:g_errorBuffer[255];
+
+// Config vars
+new cfg_minMatchLength = 4;
+new String:cfg_userRepTableName[] = "user_rep";
+new String:cfg_userRepRepColumnName[] = "rep";
+new String:cfg_userRepSteamIdColumnName[] = "steam_id";
+new String:cfg_timeFormat[] = "%Y-%m-%d- %H:%M:%S";
+new String:cfg_logPrefix[] = "[LCREP]"
 
 public Plugin:myinfo  =
 {
@@ -27,14 +32,14 @@ public OnPluginStart()
         RegConsoleCmd("down", DownVote, "Lowers someone''s reputation", 0);
         RegConsoleCmd("up", UpVote, "Raises someone''s reputation", 0);
     } else {
-        PrintToServer("Could not load reputation plugin");
+        Log("Could not load reputation plugin");
     }
     AutoExecConfig();
 }
 
 public OnPluginEnd()
 {
-    CloseHandle(db);
+    CloseHandle(g_dbHandle);
 }
 
 public OnClientPostAdminCheck(client) 
@@ -53,21 +58,21 @@ public bool:DbExists()
 {
     decl String:queryStr[512];
     Format(queryStr, sizeof(queryStr), "select name from sqlite_master where type='table' and tbl_name=?");
-    new Handle:query = SQL_PrepareQuery(db, queryStr, errors, sizeof(errors));
-    SQL_BindParamString(query, 0, user_rep_table_name, true);
-    PrintToServer("Calling query: %s with param %s", queryStr, user_rep_table_name);
+    new Handle:query = SQL_PrepareQuery(g_dbHandle, queryStr, g_errorBuffer, sizeof(g_errorBuffer));
+    SQL_BindParamString(query, 0, cfg_userRepTableName, true);
+    Log("Calling query: %s with param %s", queryStr, cfg_userRepTableName);
     if (!SQL_Execute(query)) {
-        PrintToServer("Failed executing query checking for existing tables");
+        Log("Failed executing query checking for existing tables");
         return false;
     }
     if (query == INVALID_HANDLE) {
-        PrintToServer("Received invalid handle result from check for existing tables");
+        Log("Received invalid handle result from check for existing tables");
         return false;
     } else {
         new String:tableName[255];
         while (SQL_FetchRow(query)) {
             SQL_FetchString(query, 0, tableName, 255);
-            PrintToServer("In table check, found table: %s", tableName);
+            Log("In table check, found table: %s", tableName);
             return (tableName[0] != EOS);
         }
     }
@@ -76,22 +81,21 @@ public bool:DbExists()
 
 public CreateDb()
 {
-    PrintToServer("Creating user_rep table");
-    SQL_FastQuery(db, "CREATE TABLE user_rep(steam_id TEXT, rep INTEGER)");
-    // other tables here 
+    Log("Creating user_rep table");
+    SQL_FastQuery(g_dbHandle, "CREATE TABLE user_rep(steam_id TEXT, rep INTEGER)");
 }
 
 public InitDb()
 {
-    db = SQL_DefConnect(errors, sizeof(errors));
-    if (db == INVALID_HANDLE) {
-        PrintToServer("Could not connect: %s", errors);
+    g_dbHandle = SQL_DefConnect(g_errorBuffer, sizeof(g_errorBuffer));
+    if (g_dbHandle == INVALID_HANDLE) {
+        Log("Could not connect: %s", g_errorBuffer);
         return false;
     } else {
         if (!DbExists()) {
             CreateDb();
         }
-        PrintToServer("LCs reputation plugin loaded");
+        Log("LCs reputation plugin loaded");
         return true;
     }
 }
@@ -127,7 +131,7 @@ public GetUserNameFromSubString(String:partialName[], String:resultName[])
         currentMatchLength = 0;
         if (IsClientConnected(i) && !IsFakeClient(i) && IsClientInGame(i) &&
             GetClientName(i, clientName, sizeof(clientName))) {
-            PrintToServer("Comparing against %s", clientName);
+            Log("Comparing against %s", clientName);
             new minLength = min(strlen(clientName), strlen(partialName));
             new clientChar, argChar;
             for (new c = 0; c < minLength; c++) 
@@ -142,22 +146,22 @@ public GetUserNameFromSubString(String:partialName[], String:resultName[])
                 }
             }
             if (currentMatchLength >= longestMatchLength) {
-                PrintToServer("Found better match: %s", clientName);
+                Log("Found better match: %s", clientName);
                 bestMatch = clientName;
                 clientMatch = i;
                 longestMatchLength = currentMatchLength;
             }
         }
     }
-    if (longestMatchLength < MinMatchLength)
+    if (longestMatchLength < cfg_minMatchLength)
     {
         new String:empty[1] = "";
         strcopy(resultName, sizeof(empty), empty);
-        PrintToServer("No suitable match found");
+        Log("No suitable match found");
         return -1;
     } else {
         strcopy(resultName, sizeof(bestMatch), bestMatch);
-        PrintToServer("Best match = %s", bestMatch);
+        Log("Best match = %s", bestMatch);
         return clientMatch;
     }
 }
@@ -182,15 +186,15 @@ public UpdateRepByName(client, String:name[], amount) {
     new String:playerName[256];
     new targetClient = GetUserNameFromSubString(name, playerName);
     if (targetClient == -1) {
-        PrintToChat(client, "Did not match at least %d characters", MinMatchLength);
+        PrintToChat(client, "Did not match at least %d characters", cfg_minMatchLength);
     } else {
         new String:mappedSteamId[256];
         if (GetClientAuthString(targetClient, mappedSteamId, sizeof(mappedSteamId))) {
-            PrintToServer("Found steamId for %s: %s", playerName, mappedSteamId);
+            Log("Found steamId for %s: %s", playerName, mappedSteamId);
             new rep = AddToRep(mappedSteamId, amount);
             PrintToChatAll("%s repuation is now: %d", playerName, rep);
         } else {
-            PrintToServer("Unable to get SteamID for %s", playerName);
+            Log("Unable to get SteamID for %s", playerName);
         }
     }
 }
@@ -199,23 +203,23 @@ public AddToRep(String:steamId[], amount)
 {
     AddUserIfNotPresent(steamId);
     decl String:queryStr[512];
-    Format(queryStr, sizeof(queryStr), "update %s set %s = %s + (%d) where %s = ?", user_rep_table_name, user_rep_rep_column_name, user_rep_rep_column_name, amount, user_rep_steamid_column_name);
-    new Handle:query = SQL_PrepareQuery(db, queryStr, errors, sizeof(errors));
+    Format(queryStr, sizeof(queryStr), "update %s set %s = %s + (%d) where %s = ?", cfg_userRepTableName, cfg_userRepRepColumnName, cfg_userRepRepColumnName, amount, cfg_userRepSteamIdColumnName);
+    new Handle:query = SQL_PrepareQuery(g_dbHandle, queryStr, g_errorBuffer, sizeof(g_errorBuffer));
     SQL_BindParamString(query, 0, steamId, true);
-    PrintToServer("Calling query: %s with param %s", queryStr, steamId);
+    Log("Calling query: %s with param %s", queryStr, steamId);
     if (!SQL_Execute(query)) {
-        PrintToServer("Failed executing rep update query");
+        Log("Failed executing rep update query");
         return 0;
     } else if (query == INVALID_HANDLE) {
-        PrintToServer("Received invalid handle result from rep update query");
+        Log("Received invalid handle result from rep update query");
         return 0;
     } else {
         // check result??
         Format(queryStr, sizeof(queryStr), "select %s from %s where %s = ?", 
-            user_rep_rep_column_name, user_rep_table_name, user_rep_steamid_column_name);
-        query = SQL_PrepareQuery(db, queryStr, errors, sizeof(errors));
+            cfg_userRepRepColumnName, cfg_userRepTableName, cfg_userRepSteamIdColumnName);
+        query = SQL_PrepareQuery(g_dbHandle, queryStr, g_errorBuffer, sizeof(g_errorBuffer));
         SQL_BindParamString(query, 0, steamId, true);
-        PrintToServer("Calling query: %s with param %s", queryStr, steamId);
+        Log("Calling query: %s with param %s", queryStr, steamId);
         SQL_Execute(query);
         while (SQL_FetchRow(query)) {
             return SQL_FetchInt(query, 0);
@@ -228,19 +232,19 @@ public AddUserIfNotPresent(String:steamId[])
 {
     if (!IsUserPresent(steamId)) {
         decl String:queryStr[512];
-        PrintToServer("User %s not present, adding", steamId);
+        Log("User %s not present, adding", steamId);
         Format(queryStr, sizeof(queryStr), "insert into %s(%s, %s) values(0, ?)",
-            user_rep_table_name, user_rep_rep_column_name, user_rep_steamid_column_name);
-        new Handle:query = SQL_PrepareQuery(db, queryStr, errors, sizeof(errors));
+            cfg_userRepTableName, cfg_userRepRepColumnName, cfg_userRepSteamIdColumnName);
+        new Handle:query = SQL_PrepareQuery(g_dbHandle, queryStr, g_errorBuffer, sizeof(g_errorBuffer));
         SQL_BindParamString(query, 0, steamId, true);
-        PrintToServer("Calling query: %s with param %s", queryStr, steamId);
+        Log("Calling query: %s with param %s", queryStr, steamId);
         new success = SQL_Execute(query);
         if (!success) {
-            PrintToServer("Failed executing user creation query");
+            Log("Failed executing user creation query");
         } else if (query == INVALID_HANDLE) {
-            PrintToServer("Received invalid handle result from user creation query");
+            Log("Received invalid handle result from user creation query");
         } else {
-            PrintToServer("Successfully created user with id: %s, result: %s", steamId, success);
+            Log("Successfully created user with id: %s, result: %s", steamId, success);
         }
     }
 }
@@ -249,19 +253,31 @@ public bool:IsUserPresent(String:steamId[])
 {
     // queryStr will hold all our prepared queries
     decl String:queryStr[512];
-    Format(queryStr, sizeof(queryStr), "select count(1) from %s where %s = ?", user_rep_table_name, user_rep_steamid_column_name);
-    new Handle:query = SQL_PrepareQuery(db, queryStr, errors, sizeof(errors));
+    Format(queryStr, sizeof(queryStr), "select count(1) from %s where %s = ?", cfg_userRepTableName, cfg_userRepSteamIdColumnName);
+    new Handle:query = SQL_PrepareQuery(g_dbHandle, queryStr, g_errorBuffer, sizeof(g_errorBuffer));
     SQL_BindParamString(query, 0, steamId, true);
-    PrintToServer("Calling query: %s with param %s", queryStr, steamId);
+    Log("Calling query: %s with param %s", queryStr, steamId);
     if (!SQL_Execute(query)) {
-        PrintToServer("Failed executing user check query");
+        Log("Failed executing user check query");
         return false;
     } else if (query == INVALID_HANDLE) {
-        PrintToServer("Received invalid handle result from user check query");
+        Log("Received invalid handle result from user check query");
         return false;
     } else {
         SQL_FetchRow(query);
         new rowCount = SQL_FetchInt(query, 0);
         return (rowCount != 0);
     }
+}
+
+public Log(const String:msg[], any:...) {
+    decl String:timeString[50];
+    FormatTime(timeString, sizeof(timeString), cfg_timeFormat);
+
+    decl String:formattedMsg[1024];
+    VFormat(formattedMsg, sizeof(formattedMsg), msg, 2);
+
+    decl String:logMsg[1024];
+    Format(logMsg, sizeof(logMsg), "%s %s %s", cfg_logPrefix, timeString, formattedMsg);
+    PrintToServer(logMsg);
 }
