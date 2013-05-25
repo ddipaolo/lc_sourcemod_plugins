@@ -26,6 +26,7 @@ public Plugin:myinfo  =
     url = "http://lmgtfy.com"
 };
 
+//  SourceMod plugin hooks
 public OnPluginStart()
 {
     if (InitDb()) {
@@ -54,6 +55,45 @@ public OnClientPostAdminCheck(client)
     }
 }
 
+// Command callbacks
+public Action:DownVote(client, args)
+{
+    new String:full[256];
+    GetCmdArgString(full, sizeof(full));
+    UpdateRepByName(client, full, -1);
+    return Plugin_Handled;
+}
+
+public Action:UpVote(client, args)
+{
+    new String:full[256];
+    GetCmdArgString(full, sizeof(full));
+    UpdateRepByName(client, full, 1);
+    return Plugin_Handled;
+}
+
+// DB utility functions
+public InitDb()
+{
+    g_dbHandle = SQL_DefConnect(g_errorBuffer, sizeof(g_errorBuffer));
+    if (g_dbHandle == INVALID_HANDLE) {
+        Log("Could not connect: %s", g_errorBuffer);
+        return false;
+    } else {
+        if (!DbExists()) {
+            CreateDb();
+        }
+        Log("LCs reputation plugin loaded");
+        return true;
+    }
+}
+
+public CreateDb()
+{
+    Log("Creating user_rep table");
+    SQL_FastQuery(g_dbHandle, "CREATE TABLE user_rep(steam_id TEXT, rep INTEGER)");
+}
+
 public bool:DbExists()
 {
     decl String:queryStr[512];
@@ -79,27 +119,7 @@ public bool:DbExists()
     return false;
 }
 
-public CreateDb()
-{
-    Log("Creating user_rep table");
-    SQL_FastQuery(g_dbHandle, "CREATE TABLE user_rep(steam_id TEXT, rep INTEGER)");
-}
-
-public InitDb()
-{
-    g_dbHandle = SQL_DefConnect(g_errorBuffer, sizeof(g_errorBuffer));
-    if (g_dbHandle == INVALID_HANDLE) {
-        Log("Could not connect: %s", g_errorBuffer);
-        return false;
-    } else {
-        if (!DbExists()) {
-            CreateDb();
-        }
-        Log("LCs reputation plugin loaded");
-        return true;
-    }
-}
-
+// General utility functions
 public min (a, b) 
 {
     if (a > b) {
@@ -164,22 +184,6 @@ public GetUserNameFromSubString(String:partialName[], String:resultName[])
         Log("Best match = %s", bestMatch);
         return clientMatch;
     }
-}
-
-public Action:DownVote(client, args)
-{
-    new String:full[256];
-    GetCmdArgString(full, sizeof(full));
-    UpdateRepByName(client, full, -1);
-    return Plugin_Handled;
-}
-
-public Action:UpVote(client, args)
-{
-    new String:full[256];
-    GetCmdArgString(full, sizeof(full));
-    UpdateRepByName(client, full, 1);
-    return Plugin_Handled;
 }
 
 public UpdateRepByName(client, String:name[], amount) {
