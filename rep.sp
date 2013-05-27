@@ -43,18 +43,6 @@ public OnPluginEnd()
     CloseHandle(g_dbHandle);
 }
 
-public OnClientPostAdminCheck(client) 
-{
-    new String:clientName[255];
-    GetClientName(client, clientName, sizeof(clientName));
-    PrintToServer("Checking for %s in database", clientName);
-    new String:steamId[255];
-    if (IsClientConnected(client) && !IsFakeClient(client) && IsClientInGame(client) &&
-        GetClientAuthString(client, steamId, sizeof(steamId))) {
-            AddUserIfNotPresent(steamId);
-    }
-}
-
 // Command callbacks
 public Action:DownVote(client, args)
 {
@@ -196,7 +184,7 @@ public UpdateRepByName(client, String:name[], amount) {
         if (GetClientAuthString(targetClient, mappedSteamId, sizeof(mappedSteamId))) {
             Log("Found steamId for %s: %s", playerName, mappedSteamId);
             new rep = AddToRep(mappedSteamId, amount);
-            PrintToChatAll("%s repuation is now: %d", playerName, rep);
+            PrintToChatAll("%s reputation is now: %d", playerName, rep);
         } else {
             Log("Unable to get SteamID for %s", playerName);
         }
